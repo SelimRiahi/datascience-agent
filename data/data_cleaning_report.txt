@@ -1,0 +1,71 @@
+
+=== RAPPORT DE NETTOYAGE AUTOMATIQUE ===
+Date: 2025-09-17T19:46:30.461519
+
+RÉSUMÉ:
+- Dimensions originales: (541909, 8)
+- Dimensions après nettoyage: (540455, 8)
+- Score de qualité final: 100.0/100
+
+ANALYSE PAR COLONNE:
+
+InvoiceNo:
+  - Type: numeric
+  - Contexte métier: numéro de facture (confiance: 0.99)
+  - Valeurs manquantes: 0.0%
+  - Problèmes détectés: []
+  - Actions recommandées: ["vérification de l'unicité", 'recherche de doublons']
+
+StockCode:
+  - Type: numeric
+  - Contexte métier: Code de produit ou référence article (confiance: 0.90)
+  - Valeurs manquantes: 0.0%
+  - Problèmes détectés: ['outliers']
+  - Actions recommandées: ['vérifier la cohérence des formats', 'valider les codes de produit']
+
+Description:
+  - Type: text
+  - Contexte métier: catégorie produit (confiance: 0.90)
+  - Valeurs manquantes: 0.3%
+  - Problèmes détectés: ['missing_values']
+  - Actions recommandées: ['supprimer les valeurs vides ou manquantes', 'normaliser les descriptions']
+
+Quantity:
+  - Type: numeric
+  - Contexte métier: quantité de produits commandés ou vendus (confiance: 0.80)
+  - Valeurs manquantes: 0.0%
+  - Problèmes détectés: ['outliers']
+  - Actions recommandées: ['détecter et traiter les outliers', 'vérifier les valeurs négatives']
+
+InvoiceDate:
+  - Type: datetime
+  - Contexte métier: date de transaction (confiance: 0.99)
+  - Valeurs manquantes: 0.0%
+  - Problèmes détectés: []
+  - Actions recommandées: ['valider les dates futures']
+
+UnitPrice:
+  - Type: numeric
+  - Contexte métier: montant financier (confiance: 0.99)
+  - Valeurs manquantes: 0.0%
+  - Problèmes détectés: ['outliers']
+  - Actions recommandées: ['détection et traitement des outliers', 'vérification des valeurs négatives']
+
+CustomerID:
+  - Type: numeric
+  - Contexte métier: identifiant client (confiance: 0.99)
+  - Valeurs manquantes: 24.9%
+  - Problèmes détectés: ['missing_values']
+  - Actions recommandées: ['imputer_missing_values_with_unique_id', 'validate_data_integrity']
+
+Country:
+  - Type: categorical
+  - Contexte métier: pays ou région d'origine (confiance: 1.00)
+  - Valeurs manquantes: 0.0%
+  - Problèmes détectés: []
+  - Actions recommandées: ['normalisation des valeurs', 'suppression des doublons']
+
+MÉTRIQUES DE VALIDATION:
+- Amélioration de complétude: 0.001
+- Taux de conservation des données: 0.997
+- Complétude finale: 0.969
