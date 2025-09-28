@@ -1,0 +1,99 @@
+# 🤖 INTELLIGENT DATA SCIENCE AGENT - GITIGNORE
+# ================================================
+
+# 🐍 Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 🌐 Virtual Environment
+venv/
+.venv/
+env/
+.env/
+ENV/
+env.bak/
+venv.bak/
+
+# 🔒 Secrets & API Keys
+secrets_config.py
+.env
+*.key
+*.pem
+config.ini
+credentials.json
+
+# 📊 Data Files (too large for git)
+data/*.csv
+data/*.xlsx
+data/*.json
+data/*.parquet
+*.csv
+*.xlsx
+# Keep example data
+!data/example_*.csv
+
+# 🗄️ Database Files (contain training history - optional)
+*.db
+*.sqlite
+*.sqlite3
+# Keep the intelligence database - it's valuable!
+!ml_agent/ml_intelligence.db
+
+# 🧠 Model Files (too large)
+models/
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
+
+# 📝 Logs & Temp Files
+logs/
+*.log
+temp/
+tmp/
+.temp/
+.tmp/
+
+# 💻 IDE & Editor Files
+.vscode/settings.json
+.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+
+# 📊 Jupyter Notebooks checkpoints
+.ipynb_checkpoints/
+
+# 🔧 OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 🚀 Build & Distribution
+*.egg-info/
+dist/
+build/
