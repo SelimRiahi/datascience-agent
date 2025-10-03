@@ -54,8 +54,16 @@ data/*.parquet
 *.db
 *.sqlite
 *.sqlite3
-# Keep the intelligence database - it's valuable!
+# Keep the ML intelligence database
 !ml_agent/ml_intelligence.db
+
+# 📊 Visualization System
+visualization/temp*.csv
+visualization/temp*.json
+visualization/temp*.xlsx
+visualization/__pycache__/
+# Visualization learning database (gets recreated)
+ml_agent/visualization_learning.db
 
 # 🧠 Model Files (too large)
 models/
