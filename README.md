@@ -57,8 +57,7 @@ Select your data columns and let the AI recommend the best visualizations. Gener
 │   ├── smart_recommender.py       # Chart recommendations
 │   ├── beautiful_dashboard.py     # Dashboard generator
 │   └── learning_database.py       # Learning system
-└── insights/                       # Analysis tools
-    └── insights_agent.py          # Data insights
+
 ```
 
 ## Tech Stack
