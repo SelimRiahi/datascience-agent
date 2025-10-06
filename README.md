@@ -1,91 +1,75 @@
-# 🤖 Intelligent Data Science Agent
+# Data Science Agent
 
-An AI-powered machine learning agent that learns from experience and provides intelligent model recommendations.
+A complete data science workflow tool with data cleaning, machine learning, and visualization. Built with Streamlit and powered by LLMs for intelligent recommendations.
 
-## 🎯 Features
+## Features
 
-- **🧠 Historical Intelligence**: Learns from past experiments to predict which models will work best
-- **🔮 Performance Prediction**: Predicts model performance before training
-- **⚡ Efficiency Optimization**: Can skip inferior models when confident
-- **🎯 User Control**: You choose whether to trust the AI or test all models
-- **📊 Interactive Interface**: Easy-to-use command line interface
+- **Data Cleaning**: Upload messy datasets and get them cleaned automatically with AI recommendations
+- **ML Training**: Train models with AutoML, compare algorithms, and track performance
+- **Visualization**: Generate PowerBI-style dashboards with smart chart recommendations
 
-## 🚀 Quick Start
+## Setup
 
-1. **Install dependencies:**
+1. Install dependencies:
 
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. **Add your data:**
-
-   - Put your CSV files in the `data/` folder
-   - The agent will let you choose which dataset to analyze
-
-3. **Run the agent:**
-
-   ```bash
-   python main.py
-   ```
-
-4. **Follow the interactive prompts:**
-   - Select your dataset
-   - Choose target column (what to predict)
-   - Choose features (what to use for prediction)
-   - Decide whether to trust the AI's recommendations
-
-## 💡 How It Works
-
-### 🧠 Intelligence System
-
-- **Database**: Stores results from every experiment in `ml_intelligence.db`
-- **Pattern Recognition**: Identifies which models work best for similar datasets
-- **Confidence Levels**: HIGH/MEDIUM/LOW confidence based on historical success
-
-### 🎯 User Options
-
-1. **Trust Agent** (⚡ 80% time savings): Train only the AI's recommended model
-2. **Trust LLM**: Train the top 3 models suggested by the language model
-3. **Full Analysis**: Test all available models for complete comparison
-
-### 📈 Continuous Learning
-
-- Every experiment is saved to build intelligence
-- The more you use it, the smarter it becomes
-- Accurately predicts performance before training
-
-## 📊 Example Results
-
-```
-🧠 AI AGENT'S INTELLIGENCE:
-   📚 Historical experience: 25 similar experiments
-   🏆 Best performer: LinearRegression
-   📈 Win rate: 36.0% (9/25 times)
-   🔮 Predicted R²: 0.836 (±0.010)
-
-🏆 FINAL RESULTS:
-   🥇 Best model: LinearRegression
-   📈 Score: 0.840
-   🎯 AGENT ACCURACY: ✅ PERFECT!
-   🔮 PERFORMANCE PREDICTION: 🎯 EXCELLENT
+```bash
+pip install -r requirements.txt
 ```
 
-## 🔧 Project Structure
+2. Add your API keys in `data_quality/secrets_config.py`:
 
-```
-data_science_agent/
-├── main.py                 # Main interface
-├── data/                   # Put your CSV files here
-├── ml_agent/              # Core AI agent code
-│   ├── smart_ml_agent.py  # Main ML agent
-│   └── ml_database.py     # Intelligence database
-├── ml_intelligence.db     # AI's memory/learning database
-└── requirements.txt       # Dependencies
+```python
+GEMINI_API_KEY = "your_gemini_key_here"
+GROQ_API_KEY = "your_groq_key_here"
 ```
 
-## 🎉 Ready to Use!
+3. Run the app:
 
-This agent represents a complete evolution from basic ML pipeline to intelligent, autonomous data science agent that learns, predicts, and acts decisively based on accumulated intelligence.
+```bash
+streamlit run app.py
+```
 
-**Start with `python main.py` and let the AI guide your machine learning experiments!** 🚀
+## Usage
+
+### Data Cleaning
+
+Upload a CSV or Excel file, review the AI suggestions, and download the cleaned dataset.
+
+### ML Training
+
+Choose your prediction type (classification or regression), pick columns, and train models. Results are saved with history tracking.
+
+### Visualization
+
+Select your data columns and let the AI recommend the best visualizations. Generate full dashboards with statistics and PowerBI-style charts.
+
+## Project Structure
+
+```
+├── app.py                          # Main Streamlit app
+├── data_quality/                   # Data cleaning module
+│   ├── data_cleaning_agent.py     # Cleaning logic
+│   └── secrets_config.py          # API keys
+├── ml_agent/                       # ML training module
+│   ├── smart_ml_agent.py          # AutoML engine
+│   └── ml_database.py             # Training history
+├── visualization/                  # Visualization module
+│   ├── smart_recommender.py       # Chart recommendations
+│   ├── beautiful_dashboard.py     # Dashboard generator
+│   └── learning_database.py       # Learning system
+└── insights/                       # Analysis tools
+    └── insights_agent.py          # Data insights
+```
+
+## Tech Stack
+
+- **Frontend**: Streamlit
+- **ML**: scikit-learn, XGBoost, LightGBM
+- **Visualization**: Plotly
+- **AI**: Google Gemini, Groq LLaMA
+
+## Notes
+
+- Database files (`.db`) are created automatically
+- Temp files are ignored by git
+- Models and large datasets are not committed

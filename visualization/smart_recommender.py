@@ -4,8 +4,8 @@ This is the hybrid system that learns from history and reduces LLM costs
 """
 
 import pandas as pd
-from learning_database import LearningDatabase
-from intelligent_visualizer import IntelligentVisualizer
+from .learning_database import LearningDatabase
+from .intelligent_visualizer import IntelligentVisualizer
 import json
 
 class SmartRecommender:

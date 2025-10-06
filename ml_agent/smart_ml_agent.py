@@ -14,7 +14,7 @@ from xgboost import XGBClassifier, XGBRegressor
 from lightgbm import LGBMClassifier, LGBMRegressor
 
 # Import ML Database for intelligence
-from ml_database import MLDatabase
+from .ml_database import MLDatabase
 
 # Import OpenAI and secrets (same as data cleaning agent)
 import sys
@@ -314,6 +314,8 @@ Response format: ["Model1", "Model2", "Model3"]
         # Train and evaluate models
         print("🚀 Step 4: Training and evaluating models...")
         results = []
+        best_model_instance = None
+        best_score_so_far = -float('inf')
         
         problem_type = metadata['problem_type']
         available_models = self.models[problem_type]
@@ -350,8 +352,14 @@ Response format: ["Model1", "Model2", "Model3"]
                 results.append({
                     'model': model_name,
                     'score': score,
-                    'metric': metric
+                    'metric': metric,
+                    'training_time': training_time
                 })
+                
+                # Track best model instance
+                if score > best_score_so_far:
+                    best_score_so_far = score
+                    best_model_instance = model
                 
                 # Sample predictions for storage
                 sample_preds = []
@@ -413,7 +421,22 @@ Response format: ["Model1", "Model2", "Model3"]
             for i in range(5):
                 print(f"   Actual: {y_test_array[i]}, Predicted: {sample_predictions[i]}")
         
-        return results
+        # Return comprehensive results including intelligence data
+        return {
+            'results': results,
+            'best_model_name': best_result['model'] if results else None,
+            'best_model_instance': best_model_instance,
+            'db_stats': stats,
+            'performance_prediction': performance_prediction,
+            'llm_recommendations': enhanced_rec,
+            'metadata': metadata,
+            'preprocessed_data': {
+                'X_train': X_train,
+                'X_test': X_test,
+                'y_train': y_train,
+                'y_test': y_test
+            }
+        }
     
     def _make_predictions(self, df, model_name):
         """Make predictions on new data using the specified model"""

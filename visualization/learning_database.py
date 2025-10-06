@@ -31,7 +31,7 @@ class LearningDatabase:
     
     def _init_database(self):
         """Create database and tables if they don't exist"""
-        self.conn = sqlite3.connect(str(self.db_path))
+        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         cursor = self.conn.cursor()
         
         # Table 1: Visualization Sessions

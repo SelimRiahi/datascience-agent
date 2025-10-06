@@ -1,107 +1,50 @@
-# 🤖 INTELLIGENT DATA SCIENCE AGENT - GITIGNORE
-# ================================================
-
-# 🐍 Python
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
 
-# 🌐 Virtual Environment
+# Virtual Environment
 venv/
-.venv/
 env/
-.env/
 ENV/
-env.bak/
-venv.bak/
 
-# 🔒 Secrets & API Keys
+# Secrets & API Keys
 secrets_config.py
 .env
 *.key
-*.pem
-config.ini
-credentials.json
 
-# 📊 Data Files (too large for git)
+# Data Files (too large)
 data/*.csv
 data/*.xlsx
 data/*.json
-data/*.parquet
 *.csv
 *.xlsx
-# Keep example data
-!data/example_*.csv
+!data/example*.csv
 
-# 🗄️ Database Files (contain training history - optional)
+# Database Files
 *.db
 *.sqlite
 *.sqlite3
-# Keep the ML intelligence database
-!ml_agent/ml_intelligence.db
 
-# 📊 Visualization System
-visualization/temp*.csv
-visualization/temp*.json
-visualization/temp*.xlsx
-visualization/__pycache__/
-# Visualization learning database (gets recreated)
-ml_agent/visualization_learning.db
-
-# 🧠 Model Files (too large)
-models/
-*.pkl
-*.joblib
-*.h5
-*.pt
-*.pth
-
-# 📝 Logs & Temp Files
+# Temp Files
+temp*.csv
+temp*.json
+temp*.xlsx
 logs/
 *.log
-temp/
-tmp/
-.temp/
-.tmp/
 
-# 💻 IDE & Editor Files
-.vscode/settings.json
-.vscode/launch.json
+# Model Files
+*.pkl
+*.joblib
+
+# IDE
+.vscode/
 .idea/
 *.swp
-*.swo
-*~
 
-# 📊 Jupyter Notebooks checkpoints
-.ipynb_checkpoints/
-
-# 🔧 OS Files
+# OS
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
-
-# 🚀 Build & Distribution
-*.egg-info/
-dist/
-build/

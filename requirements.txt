@@ -1,4 +1,4 @@
-# Libraries Essentielles pour commencer
+# Core Data Science Libraries
 pandas==2.1.0
 numpy==1.25.0
 scikit-learn==1.3.0
@@ -6,15 +6,25 @@ plotly==5.15.0
 matplotlib==3.7.0
 seaborn==0.12.0
 
-# Base de données
+# Streamlit (Web UI)
+streamlit==1.28.0
+
+# OpenAI / LLM
+openai==1.3.0
+
+# Excel Support
+openpyxl==3.1.2
+
+# Database
 sqlalchemy==2.0.20
 psycopg2-binary==2.9.7
 
-# API et Web
+# API and Web
 fastapi==0.103.0
 uvicorn==0.23.0
 requests==2.31.0
 
-# Utilitaires
+# Utilities
 python-dotenv==1.0.0
 loguru==0.7.0
+python-multipart==0.0.6
