@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Secrets & API Keys
+secrets_config.py
+.env
+*.key
+
+# Data Files (too large)
+data/*.csv
+data/*.xlsx
+data/*.json
+*.csv
+*.xlsx
+!data/example*.csv
+
+# Database Files
+*.db
+*.sqlite
+*.sqlite3
+
+# Temp Files
+temp*.csv
+temp*.json
+temp*.xlsx
+logs/
+*.log
+
+# Model Files
+*.pkl
+*.joblib
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

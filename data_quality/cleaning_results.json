@@ -1,0 +1,516 @@
+{
+  "original_shape": [
+    541909,
+    8
+  ],
+  "cleaned_shape": [
+    25900,
+    8
+  ],
+  "recommendations": {
+    "dataset_info": {
+      "total_rows": 541909,
+      "total_columns": 8,
+      "column_names": [
+        "InvoiceNo",
+        "StockCode",
+        "Description",
+        "Quantity",
+        "InvoiceDate",
+        "UnitPrice",
+        "CustomerID",
+        "Country"
+      ]
+    },
+    "semantic_mapping": {
+      "InvoiceNo": "invoice_number",
+      "StockCode": "product_stock_code",
+      "Description": "product_description",
+      "Quantity": "order_quantity",
+      "InvoiceDate": "invoice_creation_date_and_time",
+      "UnitPrice": "product_unit_price",
+      "CustomerID": "customer_identifier",
+      "Country": "country_of_origin"
+    },
+    "cleaning_recommendations": {
+      "InvoiceNo": {
+        "semantic_type": "invoice_number",
+        "cleaning_logic": {
+          "business_rules": [
+            "Invoice numbers should be unique",
+            "Invoice numbers should follow a specific format",
+            "Invoice numbers should be positive integers"
+          ],
+          "cleaning_suggestions": [
+            {
+              "action": "remove_duplicates",
+              "description": "Remove duplicate invoice numbers to ensure uniqueness",
+              "priority": "critical",
+              "justification": "Duplicate invoice numbers can cause accounting errors and inconsistencies",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "mark_as_duplicate",
+                  "description": "Mark duplicate invoice numbers for manual review"
+                },
+                {
+                  "action": "remove_invalid_format",
+                  "description": "Remove invoice numbers that do not match the expected format"
+                }
+              ]
+            },
+            {
+              "action": "remove_non_numeric_values",
+              "description": "Remove non-numeric characters from invoice numbers",
+              "priority": "high",
+              "justification": "Non-numeric characters can cause errors in invoice processing",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "replace_with_null",
+                  "description": "Replace non-numeric invoice numbers with null for manual review"
+                }
+              ]
+            },
+            {
+              "action": "check_for_missing_values",
+              "description": "Identify and flag missing invoice numbers",
+              "priority": "medium",
+              "justification": "Missing invoice numbers can indicate incomplete or inaccurate data",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "fill_with_default",
+                  "description": "Fill missing invoice numbers with a default value"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "StockCode": {
+        "semantic_type": "product_stock_code",
+        "cleaning_logic": {
+          "business_rules": [
+            "Product stock codes should be unique and not empty",
+            "Product stock codes should follow a specific format or pattern",
+            "Product stock codes should be consistent across the dataset"
+          ],
+          "cleaning_suggestions": [
+            {
+              "action": "remove_duplicates",
+              "description": "Remove duplicate product stock codes to ensure uniqueness",
+              "priority": "high",
+              "justification": "Duplicate codes can lead to inventory management issues and data inconsistencies",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "mark_as_missing",
+                  "description": "Mark duplicate codes as missing for review and resolution"
+                },
+                {
+                  "action": "merge_with_master_list",
+                  "description": "Merge dataset with a master list of valid product stock codes to identify and correct duplicates"
+                }
+              ]
+            },
+            {
+              "action": "remove_empty_values",
+              "description": "Remove rows with empty or missing product stock codes",
+              "priority": "medium",
+              "justification": "Empty codes can indicate incomplete or inaccurate data",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "fill_with_default",
+                  "description": "Fill empty codes with a default value, such as 'Unknown' or 'Not Applicable'"
+                },
+                {
+                  "action": "impute_from_related_fields",
+                  "description": "Impute missing codes from related fields, such as product descriptions or categories"
+                }
+              ]
+            },
+            {
+              "action": "standardize_format",
+              "description": "Standardize the format of product stock codes to ensure consistency",
+              "priority": "low",
+              "justification": "Inconsistent formatting can lead to data integration issues and errors",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "use_regular_expressions",
+                  "description": "Use regular expressions to extract and standardize the format of product stock codes"
+                },
+                {
+                  "action": "create_data_dictionary",
+                  "description": "Create a data dictionary to document and enforce the standard format for product stock codes"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "Description": {
+        "semantic_type": "product_description",
+        "cleaning_logic": {
+          "business_rules": [
+            "Product descriptions should be concise and descriptive",
+            "Product descriptions should not contain special characters or numbers",
+            "Product descriptions should be in title case"
+          ],
+          "cleaning_suggestions": [
+            {
+              "action": "remove_special_characters",
+              "description": "Remove special characters from product descriptions to improve readability",
+              "priority": "high",
+              "justification": "Special characters can make product descriptions difficult to read and understand",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "replace_with_space",
+                  "description": "Replace special characters with a space to preserve word order"
+                },
+                {
+                  "action": "mark_for_review",
+                  "description": "Mark product descriptions with special characters for manual review"
+                }
+              ]
+            },
+            {
+              "action": "trim_whitespace",
+              "description": "Remove leading and trailing whitespace from product descriptions",
+              "priority": "medium",
+              "justification": "Whitespace can make product descriptions appear messy and unprofessional",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "remove_extra_spaces",
+                  "description": "Remove extra spaces within product descriptions to improve readability"
+                }
+              ]
+            },
+            {
+              "action": "standardize_case",
+              "description": "Convert product descriptions to title case for consistency",
+              "priority": "low",
+              "justification": "Standardizing case can improve the overall appearance of product descriptions",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "convert_to_lowercase",
+                  "description": "Convert product descriptions to lowercase for simplicity"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "Quantity": {
+        "semantic_type": "order_quantity",
+        "cleaning_logic": {
+          "business_rules": [
+            "Order quantity must be a non-negative integer",
+            "Order quantity should be within a reasonable range (e.g., not excessively large)",
+            "Order quantity may have a maximum limit based on business constraints (e.g., inventory limits)"
+          ],
+          "cleaning_suggestions": [
+            {
+              "action": "remove_negative_values",
+              "description": "Remove any order quantities with negative values as they are not valid",
+              "priority": "critical",
+              "justification": "Negative order quantities do not make business sense and could indicate data entry errors",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "mark_as_missing",
+                  "description": "Mark negative order quantities as missing for manual review"
+                },
+                {
+                  "action": "set_to_zero",
+                  "description": "Set negative order quantities to zero, assuming no order was made"
+                }
+              ]
+            },
+            {
+              "action": "cap_extreme_outliers",
+              "description": "Cap order quantities that are more than 3 standard deviations above the mean",
+              "priority": "high",
+              "justification": "Extremely large order quantities may be errors or outliers that skew analysis",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "fill_with_mean",
+                  "description": "Replace extreme outliers with the mean order quantity"
+                },
+                {
+                  "action": "log_transform",
+                  "description": "Apply a log transformation to reduce the impact of extreme outliers"
+                }
+              ]
+            },
+            {
+              "action": "round_to_nearest_integer",
+              "description": "Round order quantities to the nearest integer, as partial orders are not typically allowed",
+              "priority": "medium",
+              "justification": "Order quantities should be whole numbers, and rounding helps maintain data consistency",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "floor_value",
+                  "description": "Round down to the nearest whole number, assuming partial orders are not allowed"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "InvoiceDate": {
+        "semantic_type": "invoice_creation_date_and_time",
+        "cleaning_logic": {
+          "business_rules": [
+            "Invoice creation date and time should be in the past or present, not in the future",
+            "Invoice creation date and time should be within a reasonable range (e.g., not before the company's founding date)",
+            "Invoice creation date and time should be consistent in format"
+          ],
+          "cleaning_suggestions": [
+            {
+              "action": "remove_future_dates",
+              "description": "Remove any dates that are in the future",
+              "priority": "critical",
+              "justification": "Invoices cannot be created in the future, this indicates an error",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "cap_to_current_date",
+                  "description": "Cap any future dates to the current date"
+                },
+                {
+                  "action": "mark_as_invalid",
+                  "description": "Mark future dates as invalid for manual review"
+                }
+              ]
+            },
+            {
+              "action": "standardize_date_format",
+              "description": "Standardize the date format to a consistent format (e.g., YYYY-MM-DD HH:MM:SS)",
+              "priority": "high",
+              "justification": "Consistent formatting is necessary for accurate analysis and processing",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "convert_to_unix_timestamp",
+                  "description": "Convert dates to Unix timestamps for easier comparison and calculation"
+                }
+              ]
+            },
+            {
+              "action": "remove_outliers",
+              "description": "Remove any dates that are more than 5 standard deviations away from the mean",
+              "priority": "medium",
+              "justification": "Outlier dates may indicate errors or unusual activity",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "mark_as_outlier",
+                  "description": "Mark outlier dates for manual review"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "UnitPrice": {
+        "semantic_type": "product_unit_price",
+        "cleaning_logic": {
+          "business_rules": [
+            "Product unit prices should be non-negative numbers",
+            "Prices should be within a reasonable range for the product category",
+            "Outliers may indicate data entry errors or unusual pricing strategies"
+          ],
+          "cleaning_suggestions": [
+            {
+              "action": "remove_negative_values",
+              "description": "Delete or set to missing any product unit prices that are less than zero",
+              "priority": "critical",
+              "justification": "Negative prices are likely errors and can distort financial calculations",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "cap_at_zero",
+                  "description": "Set any negative prices to zero, assuming a minimum price floor"
+                },
+                {
+                  "action": "mark_for_review",
+                  "description": "Flag negative prices for manual review to determine the correct action"
+                }
+              ]
+            },
+            {
+              "action": "cap_extreme_outliers",
+              "description": "Limit product unit prices to 3 standard deviations from the mean to reduce the impact of outliers",
+              "priority": "high",
+              "justification": "Outliers can significantly affect statistical models and financial summaries",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "fill_with_median",
+                  "description": "Replace outlier prices with the median price to reduce the effect on means"
+                },
+                {
+                  "action": "log_transform",
+                  "description": "Apply a logarithmic transformation to reduce the impact of extreme values"
+                }
+              ]
+            },
+            {
+              "action": "round_to_cents",
+              "description": "Round all product unit prices to the nearest cent to standardize precision",
+              "priority": "medium",
+              "justification": "Rounding ensures consistency in pricing and simplifies financial calculations",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "round_to_dollars",
+                  "description": "Round prices to the nearest dollar for simplicity in certain analyses"
+                },
+                {
+                  "action": "retain_precision",
+                  "description": "Keep the original precision of prices for detailed financial modeling"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "CustomerID": {
+        "semantic_type": "customer_identifier",
+        "cleaning_logic": {
+          "business_rules": [
+            "Customer identifiers must be unique",
+            "Customer identifiers must not be empty or null",
+            "Customer identifiers must follow a specific format or pattern"
+          ],
+          "cleaning_suggestions": [
+            {
+              "action": "remove_duplicates",
+              "description": "Remove duplicate customer identifiers to ensure uniqueness",
+              "priority": "critical",
+              "justification": "Duplicate identifiers can lead to incorrect customer data and analysis",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "merge_duplicates",
+                  "description": "Merge duplicate customer identifiers into a single record"
+                },
+                {
+                  "action": "mark_as_duplicate",
+                  "description": "Mark duplicate customer identifiers for manual review"
+                }
+              ]
+            },
+            {
+              "action": "handle_missing_values",
+              "description": "Replace missing customer identifiers with a default value or flag for review",
+              "priority": "high",
+              "justification": "Missing identifiers can lead to incomplete customer data and analysis",
+              "automated": false,
+              "alternative_actions": [
+                {
+                  "action": "fill_with_default",
+                  "description": "Replace missing customer identifiers with a default value"
+                },
+                {
+                  "action": "impute_from_other_data",
+                  "description": "Impute missing customer identifiers from other related data"
+                }
+              ]
+            },
+            {
+              "action": "validate_identifier_format",
+              "description": "Validate customer identifiers against a specific format or pattern",
+              "priority": "medium",
+              "justification": "Invalid formats can lead to incorrect customer data and analysis",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "correct_format",
+                  "description": "Correct invalid customer identifier formats to match the expected pattern"
+                },
+                {
+                  "action": "flag_for_review",
+                  "description": "Flag customer identifiers with invalid formats for manual review"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "Country": {
+        "semantic_type": "country_of_origin",
+        "cleaning_logic": {
+          "business_rules": [
+            "Country of origin should be a valid, recognized country name",
+            "Country names should be consistently formatted",
+            "Country of origin should not be empty or missing"
+          ],
+          "cleaning_suggestions": [
+            {
+              "action": "standardize_country_names",
+              "description": "Convert country names to a standard format (e.g., ISO 3166-1 alpha-3 codes)",
+              "priority": "high",
+              "justification": "Consistent formatting facilitates data analysis and comparison",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "map_to_closest_match",
+                  "description": "Map unrecognized country names to the closest valid match"
+                },
+                {
+                  "action": "mark_as_invalid",
+                  "description": "Mark unrecognized country names as invalid for review"
+                }
+              ]
+            },
+            {
+              "action": "remove_duplicates",
+              "description": "Remove duplicate country of origin entries",
+              "priority": "medium",
+              "justification": "Duplicate entries can skew data analysis and lead to incorrect conclusions",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "merge_duplicates",
+                  "description": "Merge duplicate entries into a single, consolidated entry"
+                }
+              ]
+            },
+            {
+              "action": "handle_missing_values",
+              "description": "Replace missing country of origin values with a default value (e.g., 'Unknown')",
+              "priority": "low",
+              "justification": "Missing values can lead to incomplete data analysis, but may not significantly impact overall results",
+              "automated": true,
+              "alternative_actions": [
+                {
+                  "action": "impute_with_mode",
+                  "description": "Impute missing values with the most frequently occurring country of origin"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "execution_log": [
+    {
+      "action": "remove_duplicates",
+      "target": "InvoiceNo",
+      "original_rows": 541909,
+      "result_rows": 25900,
+      "rows_affected": 516009,
+      "log_message": "Removed 516009 duplicate invoice numbers from 'InvoiceNo'"
+    }
+  ]
+}

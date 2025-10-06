@@ -1,670 +1,891 @@
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Tuple, Any, Optional
-from dataclasses import dataclass
-from enum import Enum
-import re
-from scipy import stats
-from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import DBSCAN
-import logging
 import json
-from datetime import datetime
+import ast
 import warnings
-import os
-from azure.ai.inference import ChatCompletionsClient
-from azure.ai.inference.models import SystemMessage, UserMessage
-from azure.core.credentials import AzureKeyCredential
+from openai import OpenAI
+from .secrets_config import AZURE_API_KEY, AZURE_ENDPOINT, MODEL_NAME
 
-warnings.filterwarnings('ignore')
+# Suppress the specific SettingWithCopyWarning that we're addressing
+warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
 
-# Configuration du logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-class DataType(Enum):
-    NUMERIC = "numeric"
-    CATEGORICAL = "categorical"
-    DATETIME = "datetime"
-    TEXT = "text"
-    IDENTIFIER = "identifier"
-    BINARY = "binary"
-
-class QualityIssue(Enum):
-    MISSING_VALUES = "missing_values"
-    DUPLICATES = "duplicates"
-    OUTLIERS = "outliers"
-    INCONSISTENT_FORMAT = "inconsistent_format"
-    INVALID_VALUES = "invalid_values"
-
-@dataclass
-class ColumnProfile:
-    name: str
-    data_type: DataType
-    business_context: str
-    missing_count: int
-    missing_percentage: float
-    unique_count: int
-    duplicates: int
-    outliers: List[int]
-    quality_issues: List[QualityIssue]
-    recommended_actions: List[str]
-    confidence_score: float
-
-class LlamaIntegration:
-    """Interface pour l'intégration avec Azure Llama"""
-    
-    def __init__(self, model_path: str = None):
-        try:
-            import secrets_config
-            self.client = ChatCompletionsClient(
-                endpoint=secrets_config.AZURE_ENDPOINT,
-                credential=AzureKeyCredential(secrets_config.AZURE_API_KEY),
-                api_version="2024-05-01-preview"
-            )
-            self.model_name = secrets_config.MODEL_NAME
-            print("Azure Llama connecté!")
-        except Exception as e:
-            raise Exception(f"Erreur connexion Azure: {e}")
-        
-    def analyze_business_context(self, column_name: str, sample_values: List[Any]) -> Tuple[str, float]:
-        """Analyse le contexte métier d'une colonne"""
-        prompt = f"""
-        Analysez cette colonne de données :
-        Nom: {column_name}
-        Échantillon de valeurs: {sample_values[:10]}
-        
-        Déterminez le contexte métier de cette colonne (ex: identifiant client, montant financier, 
-        catégorie produit, date de transaction, etc.) et votre niveau de confiance (0-1).
-        
-        Réponse format JSON: {{"context": "description", "confidence": 0.95}}
-        """
-        
-        response = self.client.complete(
-            messages=[
-                SystemMessage(content="Vous êtes un expert en analyse de données. Répondez UNIQUEMENT en JSON valide."),
-                UserMessage(content=prompt)
-            ],
-            max_tokens=300,
-            temperature=0.1,
-            model=self.model_name
-        )
-        
-        result_text = response.choices[0].message.content.strip()
-        
-        # Extract JSON from response
-        if "```json" in result_text:
-            result_text = result_text.split("```json")[1].split("```")[0]
-        elif "{" in result_text and "}" in result_text:
-            start = result_text.find("{")
-            end = result_text.rfind("}") + 1
-            result_text = result_text[start:end]
-        
-        result = json.loads(result_text)
-        return result["context"], result["confidence"]
-    
-    def get_cleaning_strategy(self, column_profile: ColumnProfile, sample_data: List[Any]) -> Dict[str, Any]:
-        """LLM détermine la stratégie de nettoyage complète pour cette colonne"""
-        prompt = f"""
-        Vous êtes un expert data scientist. Analysez cette colonne et déterminez la stratégie de nettoyage appropriée.
-
-        COLONNE: {column_profile.name}
-        CONTEXTE MÉTIER: {column_profile.business_context}
-        ÉCHANTILLON DE DONNÉES: {sample_data[:15]}
-        PROBLÈMES DÉTECTÉS: {[issue.value for issue in column_profile.quality_issues]}
-        VALEURS MANQUANTES: {column_profile.missing_percentage:.1f}%
-        VALEURS UNIQUES: {column_profile.unique_count}
-
-        RÈGLES DATA SCIENCE IMPORTANTES:
-        1. Si c'est un identifiant/code: NE JAMAIS appliquer de statistiques (moyenne, outliers, etc.)
-        2. Si quantité négative: souvent = retour/annulation → supprimer ligne
-        3. Si identifiant commence par 'C': peut être annulation → supprimer ligne  
-        4. Si prix ≤ 0: erreur de données → supprimer ligne
-        5. Codes alphanumériques (ex: ABC123) sont NORMAUX pour identifiants
-        6. Dates futures suspectes → valider
-        7. Préserver l'intégrité métier avant tout
-
-        Déterminez:
-        - Le TYPE RÉEL de donnée (identifier/quantity/price/date/category/text)
-        - Les ACTIONS spécifiques à prendre
-        - Les VALEURS à supprimer/garder
-        - Les RÈGLES business à appliquer
-
-        Réponse JSON UNIQUEMENT:
-        {{
-            "data_category": "identifier|quantity|price|date|category|text",
-            "cleaning_actions": ["action1", "action2"],
-            "removal_rules": ["rule1", "rule2"],
-            "preserve_data": true/false,
-            "business_logic": "explication courte"
-        }}
-        """
-        
-        response = self.client.complete(
-            messages=[
-                SystemMessage(content="Expert data scientist. Répondez UNIQUEMENT en JSON valide."),
-                UserMessage(content=prompt)
-            ],
-            max_tokens=600,
-            temperature=0.1,
-            model=self.model_name
-        )
-        
-        result_text = response.choices[0].message.content.strip()
-        
-        # Extract JSON
-        if "```json" in result_text:
-            result_text = result_text.split("```json")[1].split("```")[0]
-        elif "{" in result_text and "}" in result_text:
-            start = result_text.find("{")
-            end = result_text.rfind("}") + 1
-            result_text = result_text[start:end]
-        
-        return json.loads(result_text)
-
-class DataProfiler:
-    """Analyse automatique de la qualité et profiling des données"""
-    
-    def __init__(self, llama_integration: LlamaIntegration):
-        self.llama = llama_integration
-    
-    def profile_dataset(self, df: pd.DataFrame) -> Dict[str, ColumnProfile]:
-        """Profile complet d'un dataset"""
-        profiles = {}
-        
-        logger.info(f"Profiling dataset avec {len(df.columns)} colonnes et {len(df)} lignes")
-        
-        for col in df.columns:
-            profiles[col] = self._profile_column(df, col)
-        
-        return profiles
-    
-    def _profile_column(self, df: pd.DataFrame, column: str) -> ColumnProfile:
-        """Profile une colonne spécifique"""
-        col_data = df[column]
-        
-        # Détection automatique du type
-        data_type = self._detect_data_type(col_data)
-        
-        # Analyse du contexte métier via Llama
-        sample_values = col_data.dropna().head(10).tolist()
-        business_context, confidence = self.llama.analyze_business_context(column, sample_values)
-        
-        # Calculs statistiques de base
-        missing_count = col_data.isnull().sum()
-        missing_percentage = (missing_count / len(col_data)) * 100
-        unique_count = col_data.nunique()
-        
-        # Détection des problèmes de qualité
-        quality_issues = self._detect_quality_issues(col_data, data_type)
-        duplicates = len(col_data) - unique_count
-        outliers = self._detect_outliers(col_data, data_type)
-        
-        profile = ColumnProfile(
-            name=column,
-            data_type=data_type,
-            business_context=business_context,
-            missing_count=missing_count,
-            missing_percentage=missing_percentage,
-            unique_count=unique_count,
-            duplicates=duplicates,
-            outliers=outliers,
-            quality_issues=quality_issues,
-            recommended_actions=[],
-            confidence_score=confidence
-        )
-        
-        # Génération des recommandations via Llama
-        sample_values = col_data.dropna().head(20).tolist()
-        cleaning_strategy = self.llama.get_cleaning_strategy(profile, sample_values)
-        profile.recommended_actions = cleaning_strategy.get('cleaning_actions', [])
-        
-        return profile
-    
-    def _detect_data_type(self, series: pd.Series) -> DataType:
-        """Détection intelligente du type de données"""
-        series_clean = series.dropna()
-        
-        if len(series_clean) == 0:
-            return DataType.TEXT
-        
-        print(f"Analyse type pour: échantillon = {series_clean.head(5).tolist()}")
-        
-        # Test pour les valeurs binaires
-        unique_vals = set(series_clean.astype(str).str.lower())
-        if unique_vals.issubset({'true', 'false', '1', '0', 'yes', 'no', 'oui', 'non'}):
-            print("Type détecté: BINARY")
-            return DataType.BINARY
-        
-        # Test pour les valeurs numériques AVANT les dates
-        if pd.api.types.is_numeric_dtype(series):
-            print("Type détecté: NUMERIC (pandas dtype)")
-            return DataType.NUMERIC
-        
-        # Test conversion numérique
-        try:
-            sample = series_clean.head(100)
-            numeric_converted = pd.to_numeric(sample, errors='coerce')
-            valid_numeric = numeric_converted.notna().sum()
-            
-            if valid_numeric / len(sample) > 0.8:
-                print("Type détecté: NUMERIC (conversion)")
-                return DataType.NUMERIC
-        except:
-            pass
-        
-        # Test pour les dates APRÈS les numériques
-        try:
-            sample = series_clean.head(50)
-            date_converted = pd.to_datetime(sample, infer_datetime_format=True, errors='coerce')
-            valid_dates = date_converted.notna().sum()
-            
-            if valid_dates / len(sample) > 0.7:
-                print("Type détecté: DATETIME")
-                return DataType.DATETIME
-        except:
-            pass
-        
-        # Test pour les identifiants (unique values + format court)
-        uniqueness_ratio = series.nunique() / len(series.dropna())
-        avg_length = np.mean([len(str(x)) for x in series_clean.head(10)])
-        
-        if uniqueness_ratio > 0.9 and avg_length < 20:
-            print("Type détecté: IDENTIFIER")
-            return DataType.IDENTIFIER
-        
-        # Test pour les catégories (peu de valeurs uniques)
-        if series.nunique() / len(series) < 0.1 and series.nunique() < 100:
-            print("Type détecté: CATEGORICAL")
-            return DataType.CATEGORICAL
-        
-        print("Type détecté: TEXT (fallback)")
-        return DataType.TEXT
-    
-    def _detect_quality_issues(self, series: pd.Series, data_type: DataType) -> List[QualityIssue]:
-        """Détection automatique des problèmes de qualité"""
-        issues = []
-        
-        # Valeurs manquantes
-        if series.isnull().sum() > 0:
-            issues.append(QualityIssue.MISSING_VALUES)
-        
-        # Doublons (pour les identifiants)
-        if data_type == DataType.IDENTIFIER and series.duplicated().sum() > 0:
-            issues.append(QualityIssue.DUPLICATES)
-        
-        # Outliers pour données numériques
-        if data_type == DataType.NUMERIC and len(self._detect_outliers(series, data_type)) > 0:
-            issues.append(QualityIssue.OUTLIERS)
-        
-        # Formats inconsistants
-        if self._has_inconsistent_format(series, data_type):
-            issues.append(QualityIssue.INCONSISTENT_FORMAT)
-        
-        return issues
-    
-    def _detect_outliers(self, series: pd.Series, data_type: DataType) -> List[int]:
-        """Détection d'outliers statistiques"""
-        if data_type != DataType.NUMERIC:
-            return []
-        
-        numeric_series = pd.to_numeric(series, errors='coerce').dropna()
-        if len(numeric_series) < 4:
-            return []
-        
-        # Méthode IQR
-        Q1 = numeric_series.quantile(0.25)
-        Q3 = numeric_series.quantile(0.75)
-        IQR = Q3 - Q1
-        lower_bound = Q1 - 1.5 * IQR
-        upper_bound = Q3 + 1.5 * IQR
-        
-        outlier_mask = (numeric_series < lower_bound) | (numeric_series > upper_bound)
-        return numeric_series[outlier_mask].index.tolist()
-    
-    def _has_inconsistent_format(self, series: pd.Series, data_type: DataType) -> bool:
-        """Détecte les formats inconsistants"""
-        if data_type == DataType.DATETIME:
-            # Vérifier si les dates ont des formats différents
-            sample = series.dropna().head(20)
-            formats_detected = set()
-            
-            for val in sample:
-                val_str = str(val)
-                if re.match(r'\d{4}-\d{2}-\d{2}', val_str):
-                    formats_detected.add('YYYY-MM-DD')
-                elif re.match(r'\d{2}/\d{2}/\d{4}', val_str):
-                    formats_detected.add('MM/DD/YYYY')
-                elif re.match(r'\d{2}-\d{2}-\d{4}', val_str):
-                    formats_detected.add('MM-DD-YYYY')
-            
-            return len(formats_detected) > 1
-        
-        return False
-
-class SmartCleaner:
-    """Nettoyage entièrement piloté par LLM - zéro logique hardcodée"""
-    
-    def __init__(self, llama_integration: LlamaIntegration):
-        self.llama = llama_integration
-        self.cleaning_log = []
-    
-    def clean_dataset(self, df: pd.DataFrame, profiles: Dict[str, ColumnProfile]) -> pd.DataFrame:
-        """Nettoyage automatique complet piloté par LLM"""
-        df_cleaned = df.copy()
-        
-        logger.info("Début du nettoyage intelligent 100% LLM")
-        
-        for col_name, profile in profiles.items():
-            df_cleaned = self._clean_column_with_llm(df_cleaned, col_name, profile)
-        
-        self._log_cleaning_summary(df, df_cleaned)
-        return df_cleaned
-    
-    def _clean_column_with_llm(self, df: pd.DataFrame, column: str, profile: ColumnProfile) -> pd.DataFrame:
-        """Nettoyage entièrement décidé par le LLM"""
-        original_count = len(df)
-        
-        # Échantillon de données pour le LLM
-        sample_data = df[column].dropna().head(20).tolist()
-        
-        # Le LLM décide TOUT
-        cleaning_strategy = self.llama.get_cleaning_strategy(profile, sample_data)
-        
-        print(f"LLM Strategy pour {column}: {cleaning_strategy.get('data_category')} -> {cleaning_strategy.get('business_logic')}")
-        
-        # Application pure des décisions LLM
-        df = self._apply_llm_strategy(df, column, cleaning_strategy, profile)
-        
-        # Log
-        rows_removed = original_count - len(df)
-        self.cleaning_log.append({
-            'column': column,
-            'llm_category': cleaning_strategy.get('data_category'),
-            'rows_removed': rows_removed,
-            'llm_logic': cleaning_strategy.get('business_logic'),
-            'actions_taken': cleaning_strategy.get('cleaning_actions', [])
-        })
-        
-        return df
-    
-    def _apply_llm_strategy(self, df: pd.DataFrame, column: str, strategy: Dict, profile: ColumnProfile) -> pd.DataFrame:
-        """Application directe de la stratégie LLM sans interprétation"""
-        
-        data_category = strategy.get('data_category', 'unknown')
-        removal_rules = strategy.get('removal_rules', [])
-        cleaning_actions = strategy.get('cleaning_actions', [])
-        
-        print(f"  Catégorie LLM: {data_category}")
-        print(f"  Actions: {cleaning_actions}")
-        print(f"  Règles suppression: {removal_rules}")
-        
-        # Application des règles de suppression basées sur les décisions LLM
-        for rule in removal_rules:
-            df = self._apply_removal_rule(df, column, rule, data_category)
-        
-        # Application des actions de nettoyage
-        for action in cleaning_actions:
-            df = self._apply_cleaning_action(df, column, action, data_category)
-        
-        return df
-    
-    def _apply_removal_rule(self, df: pd.DataFrame, column: str, rule: str, category: str) -> pd.DataFrame:
-        """Application d'une règle de suppression spécifique"""
-        initial_count = len(df)
-        
-        rule_lower = rule.lower()
-        
-        # Règles génériques basées sur la logique métier
-        if 'null' in rule_lower or 'manquant' in rule_lower:
-            df = df.dropna(subset=[column])
-        
-        elif 'négatif' in rule_lower or 'negative' in rule_lower:
-            if df[column].dtype in ['int64', 'float64']:
-                df = df[df[column] >= 0]
-        
-        elif 'zéro' in rule_lower or 'zero' in rule_lower:
-            if df[column].dtype in ['int64', 'float64']:
-                df = df[df[column] != 0]
-        
-        elif 'annulation' in rule_lower or 'cancel' in rule_lower:
-            if df[column].dtype == 'object':
-                # Détection flexible des codes d'annulation
-                mask = df[column].astype(str).str.upper().str.startswith('C')
-                df = df[~mask]
-        
-        elif 'vide' in rule_lower or 'empty' in rule_lower:
-            if df[column].dtype == 'object':
-                mask = (df[column].astype(str).str.strip() == '') | (df[column].astype(str) == 'nan')
-                df = df[~mask]
-        
-        elif 'futur' in rule_lower or 'future' in rule_lower:
-            if 'datetime' in str(df[column].dtype):
-                future_mask = df[column] > pd.Timestamp.now() + pd.DateOffset(years=1)
-                df = df[~future_mask]
-        
-        removed = initial_count - len(df)
-        if removed > 0:
-            print(f"    Règle '{rule}': supprimé {removed} lignes")
-        
-        return df
-    
-    def _apply_cleaning_action(self, df: pd.DataFrame, column: str, action: str, category: str) -> pd.DataFrame:
-        """Application d'une action de nettoyage spécifique"""
-        
-        action_lower = action.lower()
-        
-        # Actions de transformation (sans suppression)
-        if 'normaliser' in action_lower or 'normalize' in action_lower:
-            if df[column].dtype == 'object':
-                df[column] = df[column].astype(str).str.strip().str.title()
-        
-        elif 'standardiser' in action_lower or 'standardize' in action_lower:
-            if 'datetime' in str(df[column].dtype):
-                df[column] = pd.to_datetime(df[column], errors='coerce')
-        
-        elif 'convertir' in action_lower or 'convert' in action_lower:
-            if 'date' in action_lower:
-                df[column] = pd.to_datetime(df[column], errors='coerce')
-        
-        # Pour les identifiants: préservation maximale (pas d'actions statistiques)
-        if category == 'identifier':
-            print(f"    Identifiant détecté: préservation des données")
-        
-        return df
-    
-    def _log_cleaning_summary(self, original_df: pd.DataFrame, cleaned_df: pd.DataFrame):
-        """Log du résumé de nettoyage"""
-        logger.info("=== RÉSUMÉ DU NETTOYAGE ===")
-        logger.info(f"Lignes originales: {len(original_df)}")
-        logger.info(f"Lignes après nettoyage: {len(cleaned_df)}")
-        logger.info(f"Colonnes: {len(cleaned_df.columns)}")
-        
-        for log_entry in self.cleaning_log:
-            logger.info(f"Colonne {log_entry['column']}: {log_entry['rows_removed']} lignes supprimées")
-            logger.info(f"  Catégorie LLM: {log_entry['llm_category']}")
-            logger.info(f"  Logique: {log_entry['llm_logic']}")
-            logger.info(f"  Actions: {log_entry['actions_taken']}")
-
-class ValidationEngine:
-    """Moteur de validation et scoring de la qualité"""
-    
-    def validate_cleaning(self, original_df: pd.DataFrame, cleaned_df: pd.DataFrame) -> Dict[str, float]:
-        """Validation et scoring de la qualité après nettoyage"""
-        
-        metrics = {}
-        
-        # Taux de complétude
-        original_completeness = (1 - original_df.isnull().sum().sum() / (len(original_df) * len(original_df.columns)))
-        cleaned_completeness = (1 - cleaned_df.isnull().sum().sum() / (len(cleaned_df) * len(cleaned_df.columns)))
-        
-        metrics['completeness_improvement'] = cleaned_completeness - original_completeness
-        metrics['final_completeness'] = cleaned_completeness
-        
-        # Taux de conservation des données
-        metrics['data_retention'] = len(cleaned_df) / len(original_df)
-        
-        # Score de qualité global (0-100)
-        quality_score = (
-            cleaned_completeness * 40 +  # 40% pour la complétude
-            metrics['data_retention'] * 30 +  # 30% pour la conservation
-            0.3 * 30  # 30% pour la cohérence (simplifié)
-        )
-        
-        metrics['overall_quality_score'] = min(quality_score * 100, 100)
-        
-        return metrics
-
-class DataCleaningAgent:
-    """Agent principal de nettoyage automatique des données"""
-    
-    def __init__(self, azure_api_key: str):
-        self.llama = LlamaIntegration(azure_api_key)
-        self.profiler = DataProfiler(self.llama)
-        self.cleaner = SmartCleaner(self.llama)
-        self.validator = ValidationEngine()
-    
-    def process_file(self, file_path: str) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-        """Traitement complet d'un fichier"""
-        
-        # Chargement du fichier
-        if file_path.endswith('.csv'):
-            df = pd.read_csv(file_path)
-        elif file_path.endswith(('.xlsx', '.xls')):
-            df = pd.read_excel(file_path)
+class CompleteDataCleaningAgent:
+    def __init__(self):
+        # Initialize Azure OpenAI client
+        # Use endpoint as-is if it already has the correct format
+        if AZURE_ENDPOINT.endswith("/openai/v1/"):
+            base_url = AZURE_ENDPOINT
+        elif "models" in AZURE_ENDPOINT:
+            base_url = AZURE_ENDPOINT.replace("/models", "/openai/v1/")
         else:
-            raise ValueError("Format de fichier non supporté")
+            base_url = f"{AZURE_ENDPOINT}/openai/v1/"
+            
+        self.client = OpenAI(
+            base_url=base_url,
+            api_key=AZURE_API_KEY
+        )
+        self.model_name = MODEL_NAME
+        self.execution_log = []
         
-        logger.info(f"Fichier chargé: {file_path}")
-        logger.info(f"Dimensions: {df.shape}")
+        # Test API connectivity
+        print("🔗 Testing API connectivity...")
+        try:
+            test_response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": "Hello"}],
+                max_tokens=5,
+                temperature=0.1
+            )
+            print("✅ API connection successful!")
+        except Exception as e:
+            print(f"❌ API connection failed: {str(e)}")
+            print("⚠️  This may cause issues with semantic analysis...")
+    
+    # ==========================================
+    # STEP 1: SEMANTIC UNDERSTANDING
+    # ==========================================
+    
+    def get_semantic_understanding(self, df, sample_size=5):
+        """Step 1: Get semantic understanding from small sample"""
+        print("🔍 Step 1: Understanding column semantics from sample...")
         
-        # Profiling
-        profiles = self.profiler.profile_dataset(df)
+        semantic_results = {}
         
-        # Nettoyage
-        df_cleaned = self.cleaner.clean_dataset(df, profiles)
+        for column in df.columns:
+            # Get small sample for semantic analysis only
+            col_data = df[column]
+            sample_info = {
+                'column_name': column,
+                'data_type': str(col_data.dtype),
+                'sample_values': col_data.dropna().head(sample_size).tolist(),
+                'unique_': col_data.nunique(),
+                'has_nulls': col_data.isnull().any()
+            }
+            
+            # Get semantic type from LLM
+            semantic_type = self.determine_semantic_type(sample_info)
+            semantic_results[column] = semantic_type
+            
+            print(f"'{column}' → {semantic_type}")
         
-        # Validation
-        validation_metrics = self.validator.validate_cleaning(df, df_cleaned)
+        return semantic_results
+    
+    def determine_semantic_type(self, sample_info):
+        """Determine what a column represents from small sample"""
+        prompt = f"""
+Analyze this column sample and determine what it represents semantically.
+
+COLUMN SAMPLE:
+{json.dumps(sample_info, indent=2, default=str)}
+
+Based on the column name, data type, and sample values, determine what this column represents.
+
+Return ONLY a JSON response:
+{{
+    "semantic_type": "Clear description of what this column represents (e.g., 'customer_age', 'employee_salary', 'product_rating', 'user_email', 'phone_number', 'order_date', 'product_category', etc.)"
+}}
+
+Be specific and descriptive. Use business/domain terms that clearly indicate the column's purpose.
+Respond with valid JSON only.
+"""
         
-        # Rapport complet
-        report = {
-            'original_shape': df.shape,
-            'cleaned_shape': df_cleaned.shape,
-            'column_profiles': profiles,
-            'cleaning_log': self.cleaner.cleaning_log,
-            'validation_metrics': validation_metrics,
-            'processing_timestamp': datetime.now().isoformat()
+        try:
+            completion = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a data analyst. Respond with valid JSON only."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.1,
+                max_tokens=200
+            )
+            
+            response_text = completion.choices[0].message.content.strip()
+            
+            # Clean and parse response
+            if response_text.startswith('```json'):
+                response_text = response_text[7:].strip()
+            elif response_text.startswith('```'):
+                response_text = response_text[3:].strip()
+            if response_text.endswith('```'):
+                response_text = response_text[:-3].strip()
+            
+            start_idx = response_text.find('{')
+            end_idx = response_text.rfind('}')
+            if start_idx != -1 and end_idx != -1:
+                response_text = response_text[start_idx:end_idx+1]
+            
+            result = json.loads(response_text)
+            return result.get('semantic_type', 'unknown_column_type')
+            
+        except Exception as e:
+            print(f"⚠️  Error determining semantic type for '{sample_info.get('column_name', 'unknown')}': {str(e)}")
+            return f"unknown_column_type"
+    
+    # ==========================================
+    # STEP 2: LOGIC-BASED RECOMMENDATIONS
+    # ==========================================
+    
+    def get_cleaning_logic_for_semantic_type(self, semantic_type):
+        """Step 2: Get cleaning logic based on semantic understanding"""
+        
+        prompt = f"""
+You are a data cleaning expert. Based on the semantic type of a column, suggest logical cleaning rules and actions.
+
+COLUMN SEMANTIC TYPE: "{semantic_type}"
+
+Provide 2-3 focused cleaning suggestions with practical alternatives.
+
+Return a JSON response:
+{{
+    "business_rules": [
+        "List of business/logical rules that should apply to this type of data"
+    ],
+    "cleaning_suggestions": [
+        {{
+            "action": "Primary cleaning action (e.g., 'remove_negative_values', 'cap_extreme_outliers')",
+            "description": "Clear description of what to do",
+            "priority": "critical|high|medium|low",
+            "justification": "Why this rule makes business sense",
+            "automated": true/false,
+            "alternative_actions": [
+                {{
+                    "action": "fill_with_mean",
+                    "description": "Replace problematic values with column mean"
+                }},
+                {{
+                    "action": "mark_as_missing", 
+                    "description": "Mark problematic values as missing for review"
+                }}
+            ]
+        }}
+    ]
+}}
+
+IMPORTANT GUIDELINES:
+1. Provide only 2-3 FOCUSED suggestions per column type
+2. Keep alternative actions to 2-3 practical options (not 6)
+3. Use conservative thresholds (3-5x std dev, not extreme multipliers)
+4. Focus on the most common data quality issues for this semantic type
+
+EXAMPLES BY TYPE:
+- Numeric (age, salary, rating): negative values, extreme outliers
+- Text (names, emails): formatting, invalid patterns  
+- Identifiers: duplicates, missing values
+
+Respond with valid JSON only.
+"""
+        
+        try:
+            completion = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "You are a data cleaning expert. Provide focused, practical suggestions with 2-3 alternatives maximum. Respond with valid JSON only."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.1,
+                max_tokens=1000
+            )
+            
+            response_text = completion.choices[0].message.content.strip()
+            
+            # Clean response
+            if response_text.startswith('```json'):
+                response_text = response_text[7:].strip()
+            elif response_text.startswith('```'):
+                response_text = response_text[3:].strip()
+            if response_text.endswith('```'):
+                response_text = response_text[:-3].strip()
+            
+            start_idx = response_text.find('{')
+            end_idx = response_text.rfind('}')
+            if start_idx != -1 and end_idx != -1:
+                response_text = response_text[start_idx:end_idx+1]
+            
+            logic = json.loads(response_text)
+            return logic
+            
+        except Exception as e:
+            print(f"⚠️  Error getting cleaning logic for '{semantic_type}': {str(e)}")
+            return {
+                "business_rules": ["Could not determine rules"],
+                "cleaning_suggestions": []
+            }
+    
+    def generate_cleaning_recommendations(self, df, semantic_types):
+        """Generate cleaning recommendations based on semantic types"""
+        print(f"\n🧠 Step 2: Generating cleaning logic for each column type...")
+        
+        cleaning_recommendations = {}
+        
+        for column, semantic_type in semantic_types.items():
+            print(f"Generating logic for '{column}' ({semantic_type})...")
+            
+            cleaning_logic = self.get_cleaning_logic_for_semantic_type(semantic_type)
+            
+            cleaning_recommendations[column] = {
+                "semantic_type": semantic_type,
+                "cleaning_logic": cleaning_logic
+            }
+        
+        return {
+            "dataset_info": {
+                "total_rows": len(df),
+                "total_columns": len(df.columns),
+                "column_names": df.columns.tolist()
+            },
+            "semantic_mapping": semantic_types,
+            "cleaning_recommendations": cleaning_recommendations
         }
-        
-        return df_cleaned, report
     
-    def generate_report(self, report: Dict[str, Any]) -> str:
-        """Génère un rapport textuel détaillé"""
+    # ==========================================
+    # STEP 3: DYNAMIC FUNCTION GENERATION
+    # ==========================================
+    
+    def generate_cleaning_function(self, action_details, df_info):
+        """Generate Python function code for a specific cleaning action"""
         
-        report_text = f"""
-=== RAPPORT DE NETTOYAGE AUTOMATIQUE ===
-Date: {report['processing_timestamp']}
+        prompt = f"""
+You are a Python data cleaning expert. Generate a Python function that performs a specific cleaning action on a pandas DataFrame.
 
-RÉSUMÉ:
-- Dimensions originales: {report['original_shape']}
-- Dimensions après nettoyage: {report['cleaned_shape']}
-- Score de qualité final: {report['validation_metrics']['overall_quality_score']:.1f}/100
+CLEANING ACTION DETAILS:
+{json.dumps(action_details, indent=2, default=str)}
 
-ANALYSE PAR COLONNE:
-"""
-        
-        for col_name, profile in report['column_profiles'].items():
-            report_text += f"""
-{col_name}:
-  - Type: {profile.data_type.value}
-  - Contexte métier: {profile.business_context} (confiance: {profile.confidence_score:.2f})
-  - Valeurs manquantes: {profile.missing_percentage:.1f}%
-  - Problèmes détectés: {[issue.value for issue in profile.quality_issues]}
-  - Actions recommandées: {profile.recommended_actions}
-"""
-        
-        report_text += f"""
-MÉTRIQUES DE VALIDATION:
-- Amélioration de complétude: {report['validation_metrics']['completeness_improvement']:.3f}
-- Taux de conservation des données: {report['validation_metrics']['data_retention']:.3f}
-- Complétude finale: {report['validation_metrics']['final_completeness']:.3f}
-"""
-        
-        return report_text
+DATAFRAME INFO:
+{json.dumps(df_info, indent=2, default=str)}
 
-# Configuration et chargement des secrets
-def load_config():
-    """Charge la configuration depuis le fichier secrets"""
+Generate a Python function that:
+1. Takes a pandas DataFrame as input
+2. Performs the specific cleaning action
+3. Returns the cleaned DataFrame and a log message
+4. Is safe and handles edge cases
+5. Handles data type compatibility properly
+
+Return your response in this EXACT format:
+```python
+def cleaning_function(df):
+    '''
+    Description: [Brief description of what this function does]
+    Target: [Column(s) being cleaned]
+    Action: [Specific action being performed]
+    '''
     try:
-        import secrets_config
-        return secrets_config.AZURE_API_KEY
-    except ImportError:
-        print("Fichier 'secrets_config.py' non trouvé!")
-        print("Créez un fichier 'secrets_config.py' avec:")
-        print("AZURE_API_KEY = 'votre_cle_api_ici'")
-        return None
-    except AttributeError:
-        print("Variable 'AZURE_API_KEY' non trouvée dans secrets_config.py")
-        return None
-
-# Script principal pour traitement du fichier
-def main():
-    """Traite le fichier de données avec l'agent de nettoyage"""
-    
-    # Vérification des dépendances Azure
-    try:
-        from azure.ai.inference import ChatCompletionsClient
-    except ImportError:
-        print("Azure AI Inference non installé!")
-        print("Installez avec: pip install azure-ai-inference")
-        return
-    
-    # Configuration
-    DATA_PATH = r"C:\Users\Selim\OneDrive\Bureau\data science agent\data\data.xlsx"
-    
-    # Chargement de la clé API depuis le fichier secrets
-    API_KEY = load_config()
-    if not API_KEY:
-        return
-    
-    try:
-        # Initialisation de l'agent
-        print("Initialisation de l'Agent Data Scientist...")
-        agent = DataCleaningAgent(API_KEY)
+        import pandas as pd
+        import numpy as np
         
-        # Vérification du fichier
-        if not os.path.exists(DATA_PATH):
-            print(f"Fichier non trouvé: {DATA_PATH}")
-            return
+        # Store original row count for logging
+        original_rows = len(df)
         
-        # Traitement du fichier
-        print(f"Traitement du fichier: {DATA_PATH}")
-        df_cleaned, report = agent.process_file(DATA_PATH)
+        # [YOUR CLEANING LOGIC HERE]
+        # Make sure to use the exact column names from df_info
+        # Handle missing values and edge cases
+        # Create df_cleaned as the result
         
-        # Affichage des résultats
-        print("\n" + "="*60)
-        print("RÉSULTATS DU NETTOYAGE INTELLIGENT")
-        print("="*60)
-        print(agent.generate_report(report))
+        # Calculate impact
+        rows_affected = original_rows - len(df_cleaned)
         
-        # Sauvegarde du fichier nettoyé
-        output_path = DATA_PATH.replace('.xlsx', '_cleaned.xlsx')
-        df_cleaned.to_excel(output_path, index=False)
-        print(f"Fichier nettoyé sauvegardé: {output_path}")
+        # Create log message
+        log_message = f"[Specific description of what was done and impact]"
         
-        # Sauvegarde du rapport
-        report_path = DATA_PATH.replace('.xlsx', '_cleaning_report.txt')
-        with open(report_path, 'w', encoding='utf-8') as f:
-            f.write(agent.generate_report(report))
-        print(f"Rapport sauvegardé: {report_path}")
-        
-        print(f"\nTraitement terminé avec succès!")
-        print(f"Score de qualité final: {report['validation_metrics']['overall_quality_score']:.1f}/100")
+        return df_cleaned, log_message
         
     except Exception as e:
-        print(f"Erreur lors du traitement: {e}")
-        logger.error(f"Erreur dans main(): {e}", exc_info=True)
+        # Return original DataFrame if error occurs
+        return df, f"Error in cleaning: {{str(e)}}"
+```
 
+CRITICAL DATA TYPE REQUIREMENTS:
+- When assigning float values to integer columns, use round() function to convert to compatible type
+- For fill_with_mean operations on integer columns: use round(mean_value) or int(mean_value)
+- For fill_with_median operations on integer columns: use round(median_value) or int(median_value)  
+- Check the original column dtype from df_info and preserve it after cleaning
+- Example: If column is int64 and you calculate mean=43.67, assign round(43.67)=44
+- IMPORTANT: After all cleaning operations, restore the original column dtype using .astype()
+- Example: df_cleaned['age'] = df_cleaned['age'].astype('int64') if original was int64
+- Handle NaN values before converting back to int: either fill them or use nullable integer type 'Int64'
+
+DYNAMIC OUTLIER DETECTION REQUIREMENTS:
+- Use iterative statistical approach without domain assumptions
+- Step 1: Calculate initial Q1, Q3, and IQR for the entire dataset
+- Step 2: Identify potential extreme outliers using IQR method (Q1-2*IQR, Q3+2*IQR)
+- Step 3: Calculate "clean" statistics (mean, median) EXCLUDING the extreme outliers
+- Step 4: Compare each value against the clean statistics:
+  * If value > clean_mean + 3*clean_std OR value < clean_mean - 3*clean_std, mark as outlier
+  * This makes detection relative to the actual data distribution
+- Step 5: Replace outliers with the clean_mean (calculated without outliers)
+- This approach adapts to any dataset without hardcoded thresholds
+- Works for any numeric column regardless of what it represents
+- CRITICAL: Do NOT remove rows - only replace outlier VALUES within existing rows
+- Always preserve the same number of rows in the output DataFrame
+- Use df.loc[condition, column] = replacement_value for in-place replacement
+
+IMPORTANT REQUIREMENTS:
+- Use ONLY pandas and numpy operations
+- Use the exact column names provided in df_info
+- Handle all edge cases (missing values, empty dataframe, etc.)
+- Always return (dataframe, log_message) tuple
+- Make the function safe - no file operations, no dangerous code
+- Be specific about what the function does in the docstring
+- Always respect original column data types to avoid dtype compatibility warnings
+- Use data-driven outlier detection - no hardcoded domain rules
+- CRITICAL: Count and report actual outliers detected and replaced
+- For outlier actions: Count values that meet outlier criteria BEFORE replacement
+- Log format should be: "Replaced X outlier values in 'column' with [method]" where X is actual count
+- If no outliers found, log: "No outliers detected in 'column' using current criteria"
+
+PANDAS BEST PRACTICES TO AVOID WARNINGS:
+- NEVER modify slices directly - always work on the full DataFrame
+- Use df_cleaned = df.copy() at the beginning to create a proper copy
+- Use df_cleaned.loc[condition, column] = value instead of df_cleaned[condition][column] = value
+- Use .copy() when creating filtered DataFrames: df_filtered = df[condition].copy()
+- For operations that might create views, explicitly use .copy()
+- Example: df_cleaned = df.dropna().copy() instead of df_cleaned = df.dropna()
+- When filtering and modifying: df_cleaned.loc[df_cleaned['col'] > 5, 'col'] = replacement_value
+
+Generate the function code only, no additional explanation.
+"""
+
+        try:
+            completion = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a Python data cleaning expert. Generate safe, efficient pandas code only. Return code in the exact format requested."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.1,
+                max_tokens=1000
+            )
+            
+            response_text = completion.choices[0].message.content.strip()
+            
+            # Extract Python code from response
+            if '```python' in response_text:
+                start_idx = response_text.find('```python') + 9
+                end_idx = response_text.find('```', start_idx)
+                if end_idx != -1:
+                    code = response_text[start_idx:end_idx].strip()
+                else:
+                    code = response_text[start_idx:].strip()
+            else:
+                # If no markdown, try to find function definition
+                lines = response_text.split('\n')
+                code_lines = []
+                in_function = False
+                for line in lines:
+                    if line.strip().startswith('def '):
+                        in_function = True
+                    if in_function:
+                        code_lines.append(line)
+                code = '\n'.join(code_lines)
+            
+            return code
+            
+        except Exception as e:
+            # Return a safe fallback function
+            return f'''
+def cleaning_function(df):
+    """
+    Fallback function - no cleaning performed due to generation error
+    """
+    return df, f"Could not generate cleaning function: {str(e)}"
+'''
+    
+    # ==========================================
+    # STEP 4: SAFETY & EXECUTION
+    # ==========================================
+    
+    def validate_function_safety(self, function_code):
+        """Validate that generated function code is safe to execute"""
+        
+        # More specific dangerous patterns that are actually dangerous
+        dangerous_patterns = [
+            'import os', 'import sys', 'import subprocess', 'import shutil',
+            'open(', 'file(', 'exec(', 'eval(', '__import__',
+            'socket', 'urllib', 'requests'
+        ]
+        
+        # Dangerous file system operations (but allow pandas operations)
+        dangerous_file_ops = [
+            'os.remove', 'os.unlink', 'os.rmdir', 'shutil.rmtree',
+            'rm -', 'del /', 'rmdir /'
+        ]
+        
+        # Check for dangerous patterns - be more specific
+        code_lower = function_code.lower()
+        for pattern in dangerous_patterns:
+            # More specific checks to avoid false positives
+            if pattern in code_lower:
+                # Make sure it's not in a comment or string literal
+                lines = function_code.split('\n')
+                for line in lines:
+                    line_clean = line.strip().lower()
+                    if pattern in line_clean and not (line_clean.startswith('#') or line_clean.startswith('"""') or line_clean.startswith("'''")):
+                        # Further check if it's actually an import statement or dangerous call
+                        if ('import ' + pattern.replace('import ', '')) in line_clean or pattern + '(' in line_clean:
+                            return False, f"Potentially dangerous operation detected: {pattern}"
+        
+        # Check for dangerous file operations (more specific)
+        for pattern in dangerous_file_ops:
+            if pattern in code_lower:
+                return False, f"Dangerous file operation detected: {pattern}"
+        
+        # Try to parse the code to ensure it's valid Python
+        try:
+            ast.parse(function_code)
+        except SyntaxError as e:
+            return False, f"Invalid Python syntax: {str(e)}"
+        
+        # More flexible function name check - look for any function definition
+        if 'def ' not in function_code:
+            return False, "No function definition found"
+        
+        # If there's a function, try to find its name
+        lines = function_code.split('\n')
+        function_found = False
+        for line in lines:
+            line_stripped = line.strip()
+            if line_stripped.startswith('def ') and '(' in line_stripped:
+                function_found = True
+                break
+        
+        if not function_found:
+            return False, "No valid function definition found"
+        
+        # Check for only pandas and numpy imports (more flexible)
+        for line in lines:
+            line_stripped = line.strip().lower()
+            if line_stripped.startswith('import '):
+                if not any(allowed in line_stripped for allowed in ['pandas', 'numpy', 'pd', 'np']):
+                    # Allow if it's importing from standard library that's safe
+                    if not any(safe in line_stripped for safe in ['import re', 'import datetime', 'import math']):
+                        return False, f"Potentially unsafe import: {line.strip()}"
+        
+        return True, "Function appears safe"
+    
+    def preview_cleaning_action(self, df, action_details, sample_size=5):
+        """Preview what a cleaning action will do without executing it"""
+        
+        print(f"🔍 PREVIEW: {action_details.get('action', 'Unknown Action')}")
+        print("-" * 40)
+        
+        # Generate function
+        df_info = {
+            "columns": df.columns.tolist(),
+            "dtypes": {str(k): str(v) for k, v in df.dtypes.to_dict().items()},
+            "sample_rows": min(len(df), 5)
+        }
+        
+        function_code = self.generate_cleaning_function(action_details, df_info)
+        
+        # Validate safety
+        is_safe, safety_message = self.validate_function_safety(function_code)
+        
+        print(f"📋 Action: {action_details.get('description', 'No description')}")
+        print(f"🎯 Target: {action_details.get('target', 'Unknown target')}")
+        print(f"🔒 Safety Check: {'✅ SAFE' if is_safe else '❌ UNSAFE - ' + safety_message}")
+        
+        if not is_safe:
+            return None, safety_message
+        
+        # Test on small sample
+        try:
+            sample_df = df.head(sample_size).copy()
+            
+            # Execute function safely
+            local_scope = {'pd': pd, 'np': np}
+            exec(function_code, local_scope)
+            
+            # Find the function that was defined (more flexible)
+            function_names = [name for name in local_scope if callable(local_scope[name]) and name != 'pd' and name != 'np']
+            if not function_names:
+                return None, "No cleaning function found in generated code"
+            
+            cleaning_function = local_scope[function_names[0]]
+            
+            # Test the function
+            result_df, log_message = cleaning_function(sample_df)
+            
+            print(f"📊 Sample Test Results:")
+            print(f"   Original rows: {len(sample_df)}")
+            print(f"   Result rows: {len(result_df)}")
+            print(f"   Log: {log_message}")
+            
+            # Show code preview (first few lines)
+            code_lines = function_code.split('\n')[:10]
+            print(f"\n💻 Generated Function Preview:")
+            for line in code_lines:
+                print(f"   {line}")
+            if len(function_code.split('\n')) > 10:
+                print("   ... (truncated)")
+            
+            return function_code, "Preview successful"
+            
+        except Exception as e:
+            error_msg = f"Preview failed: {str(e)}"
+            print(f"❌ {error_msg}")
+            return None, error_msg
+    
+    def execute_cleaning_action(self, df, action_details, approved_function_code):
+        """Execute a cleaning action on the full dataframe"""
+        
+        # Final safety check
+        is_safe, safety_message = self.validate_function_safety(approved_function_code)
+        if not is_safe:
+            return df, f"Safety check failed: {safety_message}"
+        
+        try:
+            # Execute the function
+            local_scope = {'pd': pd, 'np': np}
+            exec(approved_function_code, local_scope)
+            
+            # Find the function that was defined (more flexible)
+            function_names = [name for name in local_scope if callable(local_scope[name]) and name != 'pd' and name != 'np']
+            if not function_names:
+                return df, "No cleaning function found in generated code"
+            
+            # Use the first function found
+            cleaning_function = local_scope[function_names[0]]
+            
+            # Apply to full dataframe
+            result_df, log_message = cleaning_function(df)
+            
+            # Log the execution
+            execution_record = {
+                "action": action_details.get('action', 'unknown'),
+                "target": action_details.get('target', 'unknown'),
+                "original_rows": len(df),
+                "result_rows": len(result_df),
+                "rows_affected": len(df) - len(result_df),
+                "log_message": log_message
+            }
+            self.execution_log.append(execution_record)
+            
+            return result_df, log_message
+            
+        except Exception as e:
+            error_msg = f"Execution failed: {str(e)}"
+            return df, error_msg
+    
+    # ==========================================
+    # MAIN PIPELINE: ALL STEPS INTEGRATED
+    # ==========================================
+    
+    def clean_dataset(self, df, sample_size=5, interactive=True):
+        """Complete data cleaning pipeline - all steps integrated"""
+        
+        print("🤖 COMPLETE DATA CLEANING AGENT")
+        print(f"Dataset: {len(df)} rows × {len(df.columns)} columns")
+        print("=" * 60)
+        
+        # Step 1: Semantic Understanding
+        semantic_types = self.get_semantic_understanding(df, sample_size)
+        
+        # Step 2: Generate Cleaning Recommendations
+        recommendations = self.generate_cleaning_recommendations(df, semantic_types)
+        
+        # Step 3: Execute Cleaning Actions
+        print(f"\n🚀 Step 3: Executing cleaning actions...")
+        print("=" * 50)
+        
+        current_df = df.copy()
+        
+        for column, rec in recommendations["cleaning_recommendations"].items():
+            semantic_type = rec["semantic_type"]
+            suggestions = rec["cleaning_logic"].get("cleaning_suggestions", [])
+            
+            if not suggestions:
+                continue
+                
+            print(f"\n📋 Processing column: '{column}' ({semantic_type})")
+            
+            # Flag to skip entire column
+            skip_column = False
+            
+            for suggestion in suggestions:
+                # If skip_column flag is set, break out of suggestions loop
+                if skip_column:
+                    break
+                action_details = {
+                    "action": suggestion.get("action"),
+                    "description": suggestion.get("description"),
+                    "target": column,
+                    "semantic_type": semantic_type,
+                    "priority": suggestion.get("priority"),
+                    "automated": suggestion.get("automated", False)
+                }
+                
+                print(f"\n🔧 Action: {action_details['action']} ({action_details.get('priority', 'unknown')} priority)")
+                
+                # Show alternatives upfront (simplified)
+                alternatives = suggestion.get("alternative_actions", [])
+                if alternatives:
+                    print("🔄 Options:")
+                    print(f"   0. {action_details['action']}: {action_details.get('description', 'Primary action')}")
+                    for i, alt in enumerate(alternatives[:3], 1):  # Limit to 3 alternatives
+                        print(f"   {i}. {alt.get('action', 'unknown')}: {alt.get('description', 'No description')}")
+                
+                # Preview the primary action
+                function_code, preview_result = self.preview_cleaning_action(current_df, action_details)
+                
+                if function_code is None:
+                    print(f"❌ Skipping action due to error: {preview_result}")
+                    continue
+                
+                # Enhanced interactive choice with individual skip option
+                if interactive:
+                    while True:
+                        if alternatives:
+                            print(f"\nOptions: 0-{min(len(alternatives), 3)}, 'skip'=skip this action, 'skip_col'=skip entire column, 'm'=multiple, 's'=skip all")
+                            choice = input("Choose: ").lower().strip()
+                            
+                            if choice == 's' or choice == 'skip_all':
+                                print("⏭️  Skipping all remaining actions")
+                                return current_df, recommendations
+                            elif choice == 'skip':
+                                print("⏭️  Skipping this action")
+                                function_code = None
+                                break
+                            elif choice == 'skip_col' or choice == 'skip_column':
+                                print(f"⏭️  Skipping entire column '{column}' - moving to next column")
+                                function_code = None
+                                # Set a flag to break out of the suggestions loop for this column
+                                skip_column = True
+                                break
+                            elif choice == 'm' or choice == 'multiple':
+                                # Multi-selection mode
+                                print("📋 Multi-selection mode:")
+                                print("Enter numbers separated by spaces (e.g., '0 2' for primary + alternative 2)")
+                                multi_choice = input("Choices: ").strip()
+                                
+                                try:
+                                    choices = [int(x) for x in multi_choice.split() if x.isdigit()]
+                                    valid_choices = [c for c in choices if 0 <= c <= min(len(alternatives), 3)]
+                                    
+                                    if valid_choices:
+                                        print(f"✅ Selected actions: {valid_choices}")
+                                        
+                                        # Execute multiple actions in sequence
+                                        for choice_num in valid_choices:
+                                            if choice_num == 0:
+                                                # Primary action
+                                                execute_action = action_details.copy()
+                                            else:
+                                                # Alternative action
+                                                chosen_alt = alternatives[choice_num - 1]
+                                                execute_action = action_details.copy()
+                                                execute_action["action"] = chosen_alt.get("action")
+                                                execute_action["description"] = chosen_alt.get("description")
+                                            
+                                            print(f"\n⚡ Executing: {execute_action['action']}")
+                                            
+                                            # Check if we still have data to clean
+                                            if len(current_df) == 0:
+                                                print(f"❌ No data left to clean - skipping {execute_action['action']}")
+                                                continue
+                                            
+                                            # Generate and execute function
+                                            multi_function_code = self.generate_cleaning_function(
+                                                execute_action, 
+                                                {"columns": current_df.columns.tolist(), "dtypes": {str(k): str(v) for k, v in current_df.dtypes.to_dict().items()}}
+                                            )
+                                            
+                                            if self.validate_function_safety(multi_function_code)[0]:
+                                                current_df, log_message = self.execute_cleaning_action(current_df, execute_action, multi_function_code)
+                                                print(f"✅ {log_message}")
+                                                
+                                                # Show current dataset status
+                                                print(f"   📊 Current dataset: {len(current_df)} rows × {len(current_df.columns)} columns")
+                                            else:
+                                                print(f"❌ Skipped {execute_action['action']} due to safety issues")
+                                        
+                                        function_code = None  # Skip normal execution
+                                        break
+                                    else:
+                                        print("❌ No valid choices selected")
+                                        
+                                except ValueError:
+                                    print("❌ Invalid input format. Use numbers separated by spaces.")
+                                    
+                            elif choice == '0':
+                                # Use primary action
+                                break
+                            elif choice.isdigit() and 1 <= int(choice) <= min(len(alternatives), 3):
+                                # Use alternative action
+                                chosen_alt = alternatives[int(choice) - 1]
+                                action_details["action"] = chosen_alt.get("action")
+                                action_details["description"] = chosen_alt.get("description")
+                                print(f"✅ Using: {chosen_alt.get('action')}")
+                                
+                                # Preview the alternative action
+                                function_code, preview_result = self.preview_cleaning_action(current_df, action_details)
+                                if function_code:
+                                    break
+                                else:
+                                    print(f"❌ Action failed: {preview_result}")
+                                    function_code = None
+                                    break
+                            else:
+                                print(f"Please enter 0-{min(len(alternatives), 3)}, 'skip', 'm' for multiple, or 's' to skip all")
+                        else:
+                            # No alternatives, simple y/n/skip/skip_col/s choice
+                            choice = input(f"\nExecute this cleaning action? (y/n/skip=skip this/skip_col=skip column/s=skip all): ").lower().strip()
+                            if choice in ['y', 'yes']:
+                                break
+                            elif choice in ['n', 'no', 'skip']:
+                                print("⏭️  Skipping this action")
+                                function_code = None
+                                break
+                            elif choice in ['skip_col', 'skip_column']:
+                                print(f"⏭️  Skipping entire column '{column}' - moving to next column")
+                                function_code = None
+                                skip_column = True
+                                break
+                            elif choice in ['s', 'skip_all']:
+                                print("⏭️  Skipping all remaining actions")
+                                return current_df, recommendations
+                            else:
+                                print("Please enter 'y' for yes, 'n' or 'skip' to skip this action, 'skip_col' to skip entire column, or 's' to skip all")
+                
+                # Execute if approved and we still have data
+                if function_code and len(current_df) > 0:
+                    print(f"⚡ Executing cleaning action...")
+                    current_df, log_message = self.execute_cleaning_action(current_df, action_details, function_code)
+                    print(f"✅ {log_message}")
+                    
+                    # Show dataset status after each action
+                    print(f"   📊 Dataset status: {len(current_df)} rows × {len(current_df.columns)} columns")
+                    
+                    # Show a sample of current data if not empty
+                    if len(current_df) > 0:
+                        print(f"   📋 Sample data:")
+                        print(f"   {current_df.head(2).to_string()}")
+                elif len(current_df) == 0:
+                    print(f"❌ Cannot execute - no data remaining in dataset!")
+                    break
+        
+        return current_df, recommendations
+    
+    def print_execution_summary(self):
+        """Print summary of all executed cleaning actions"""
+        
+        print("\n" + "="*60)
+        print("📊 CLEANING EXECUTION SUMMARY")
+        print("="*60)
+        
+        if not self.execution_log:
+            print("No cleaning actions were executed.")
+            return
+        
+        total_rows_affected = sum(record["rows_affected"] for record in self.execution_log)
+        
+        print(f"Total actions executed: {len(self.execution_log)}")
+        print(f"Total rows affected: {total_rows_affected}")
+        
+        for i, record in enumerate(self.execution_log, 1):
+            print(f"\n{i}. {record['action']} on '{record['target']}'")
+            print(f"   Rows: {record['original_rows']} → {record['result_rows']} ({record['rows_affected']} affected)")
+            print(f"   Result: {record['log_message']}")
+
+# Example usage
 if __name__ == "__main__":
-    main()
+    def create_sample_problematic_dataframe():
+        """Create sample data with various issues for testing"""
+        np.random.seed(42)
+        
+        data = {
+            'product_id': ['P001', 'P002', 'P003', 'P004', 'P005', 'P006', 'P007', 'P008', 'P009', 'P001'],  # Duplicate ID
+            'product_name': ['Laptop Pro', 'Wireless Mouse', '', 'Gaming Keyboard', None, 'Monitor 4K', 'USB Cable', 'Tablet Mini', 'Smartphone X', 'Laptop Pro'],
+            'price': [1299.99, 29.95, 89.99, -50.00, 599.99, 25000.00, 12.99, 349.99, 899.99, 1299.99],  # Negative price, extreme high price
+            'rating': [4.5, 3.8, 2.1, 4.9, -1.0, 15.5, 4.2, 3.6, 4.8, 4.5],  # Negative rating, rating > 5
+            'stock_quantity': [50, 120, 0, 75, -10, 999999, 25, 45, 88, 50],  # Negative stock, extremely high stock
+            'category': ['Electronics', 'Accessories', 'Electronics', 'Accessories', None, 'Electronics', '', 'Electronics', 'Electronics', 'Electronics'],
+            'supplier_email': ['tech@supplier.com', 'sales@mouse.co', 'invalid-email-format', 'gaming@keys.com', None, 'monitor@display.net', 'cable@usb', 'tablet@mini.com', 'phone@smart.co', 'tech@supplier.com'],
+            'launch_date': ['2023-01-15', '2022-05-20', 'invalid-date', '2023-03-10', '2021-12-25', '2025-12-31', '', '2022-08-05', '2023-09-15', '2023-01-15'],  # Invalid date, future date
+            'weight_kg': [2.1, 0.15, 0.8, 1.2, 0.0, -5.5, 0.05, 0.65, 0.18, 2.1],  # Zero weight, negative weight
+            'warranty_months': [24, 12, 36, 18, 0, 240, 6, 24, 12, 24]  # Extremely long warranty
+        }
+        
+        return pd.DataFrame(data)
+    
+    # Load data from Excel file
+    data_path = r"C:\Users\Selim\OneDrive\Bureau\data science agent\data\data.xlsx"
+    
+    try:
+        df = pd.read_excel(data_path)
+        print("🔍 Successfully loaded data from Excel file!")
+    except FileNotFoundError:
+        print(f"❌ File not found: {data_path}")
+        print("🔄 Using sample data instead...")
+        df = create_sample_problematic_dataframe()
+    except Exception as e:
+        print(f"❌ Error loading Excel file: {str(e)}")
+        print("🔄 Using sample data instead...")
+        df = create_sample_problematic_dataframe()
+    
+    print("🔍 Original Dataset:")
+    print(df)
+    print(f"Shape: {df.shape}")
+    
+    # Create and run the complete agent
+    agent = CompleteDataCleaningAgent()
+    
+    # Run the complete cleaning pipeline
+    cleaned_df, recommendations = agent.clean_dataset(df, sample_size=3, interactive=True)
+    
+    print(f"\n🎉 FINAL RESULTS:")
+    print(f"Original shape: {df.shape}")
+    print(f"Cleaned shape: {cleaned_df.shape}")
+    print("\nCleaned Dataset:")
+    print(cleaned_df)
+    
+    # Show execution summary
+    agent.print_execution_summary()
+    
+    # Proper Excel formatting - ensure clean data structure
+    print(f"\n🔧 Formatting data for Excel export...")
+    
+    # Clean up any problematic characters and ensure proper data types
+    formatted_df = cleaned_df.copy()
+    
+    for column in formatted_df.columns:
+        if formatted_df[column].dtype == 'object':
+            # Clean text columns - remove extra spaces and newlines for Excel
+            formatted_df[column] = formatted_df[column].astype(str).str.replace('\n', ' ').str.replace('\r', ' ')
+            formatted_df[column] = formatted_df[column].str.strip()  # Remove leading/trailing spaces
+            
+            # Handle None/nan values properly
+            formatted_df[column] = formatted_df[column].replace(['nan', 'None', 'NaN'], '')
+    
+    # Save results with proper Excel formatting
+    formatted_df.to_excel('cleaned_dataset.xlsx', index=False, engine='openpyxl')
+    print(f"✅ Properly formatted Excel file saved!")
+    
+    with open('cleaning_results.json', 'w') as f:
+        results = {
+            "original_shape": df.shape,
+            "cleaned_shape": cleaned_df.shape,
+            "recommendations": recommendations,
+            "execution_log": agent.execution_log
+        }
+        json.dump(results, f, indent=2, default=str)
+    
+    print(f"\n💾 Cleaned dataset saved to 'cleaned_dataset.xlsx'")
+    print(f"💾 Full results saved to 'cleaning_results.json'")
